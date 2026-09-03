@@ -43,5 +43,85 @@
 			<p id="sj-error"></p>
 			<pre id="sj-error-code"></pre>
 		</div>
+		<style>
+.gate{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;
+  background:rgba(8,8,10,.75);backdrop-filter:blur(16px);
+  font-family:Inter,system-ui,-apple-system,sans-serif;transition:opacity .35s ease}
+.gate.hide{opacity:0;pointer-events:none}
+.gate-card{width:min(340px,88vw);padding:32px 28px;border-radius:20px;background:#141417;
+  border:1px solid rgba(255,255,255,.07);box-shadow:0 24px 60px rgba(0,0,0,.6);
+  text-align:center;animation:pop .3s cubic-bezier(.2,.8,.3,1)}
+@keyframes pop{from{transform:translateY(12px) scale(.97);opacity:0}}
+.gate-card h2{margin:0 0 6px;color:#f2f2f4;font-size:19px;font-weight:600;letter-spacing:-.01em}
+.gate-card p{margin:0 0 22px;color:#85858e;font-size:13px;line-height:1.5}
+.pin{display:flex;gap:10px;justify-content:center}
+.pin input{width:52px;height:60px;border-radius:14px;border:1px solid rgba(255,255,255,.1);
+  background:#1c1c20;color:#fff;font-size:22px;text-align:center;outline:none;
+  caret-color:transparent;transition:border-color .15s,box-shadow .15s}
+.pin input:focus{border-color:#5b7cfa;box-shadow:0 0 0 3px rgba(91,124,250,.18)}
+.gate.err .pin{animation:shake .35s}
+.gate.err .pin input{border-color:#e0524f}
+@keyframes shake{25%{transform:translateX(-7px)}75%{transform:translateX(7px)}}
+.gate-msg{height:16px;margin-top:14px;color:#e0524f;font-size:12.5px;opacity:0;transition:opacity .2s}
+.gate.err .gate-msg{opacity:1}
+</style>
+
+<div class="gate" id="gate">
+  <div class="gate-card">
+    <h2>Access code</h2>
+    <p>Enter your 4-digit code to continue.</p>
+    <div class="pin" id="pin">
+      <input maxlength="1" inputmode="numeric" autocomplete="off">
+      <input maxlength="1" inputmode="numeric" autocomplete="off">
+      <input maxlength="1" inputmode="numeric" autocomplete="off">
+      <input maxlength="1" inputmode="numeric" autocomplete="off">
+    </div>
+    <div class="gate-msg">Incorrect code</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const PIN = "7421";   // <-- CHANGE THIS
+
+  const gate = document.getElementById('gate');
+  const boxes = [...document.querySelectorAll('#pin input')];
+
+  if (sessionStorage.getItem('gate_ok') === '1') { gate.remove(); return; }
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => boxes[0].focus(), 50);
+
+  boxes.forEach((b, i) => {
+    b.addEventListener('input', () => {
+      b.value = b.value.replace(/\D/g, '');
+      gate.classList.remove('err');
+      if (b.value && i < 3) boxes[i+1].focus();
+      if (boxes.every(x => x.value)) check();
+    });
+    b.addEventListener('keydown', e => {
+      if (e.key === 'Backspace' && !b.value && i > 0) { boxes[i-1].focus(); boxes[i-1].value = ''; }
+    });
+    b.addEventListener('paste', e => {
+      e.preventDefault();
+      const d = (e.clipboardData.getData('text') || '').replace(/\D/g,'').slice(0,4);
+      d.split('').forEach((c,j) => { if (boxes[j]) boxes[j].value = c; });
+      if (d.length === 4) check();
+    });
+  });
+
+  function check(){
+    if (boxes.map(b => b.value).join('') === PIN) {
+      sessionStorage.setItem('gate_ok','1');
+      gate.classList.add('hide');
+      document.body.style.overflow = '';
+      setTimeout(() => gate.remove(), 350);
+    } else {
+      gate.classList.add('err');
+      boxes.forEach(b => b.value = '');
+      boxes[0].focus();
+    }
+  }
+})();
+</script>
 	</body>
 </html>
