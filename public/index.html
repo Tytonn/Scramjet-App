@@ -58,7 +58,7 @@
 .gate-card p{margin:0 0 22px;color:#85858e;font-size:13px;line-height:1.5}
 .pin{display:flex;gap:10px;justify-content:center}
 .pin input{width:52px;height:60px;border-radius:14px;border:1px solid rgba(255,255,255,.1);
-  background:#1c1c20;color:#fff;font-size:22px;text-align:center;outline:none;
+  background:#1c1c20;color:#fff;font-size:34px;letter-spacing:0;text-align:center;outline:none;
   caret-color:transparent;transition:border-color .15s,box-shadow .15s}
 .pin input:focus{border-color:#5b7cfa;box-shadow:0 0 0 3px rgba(91,124,250,.18)}
 .gate.err .pin{animation:shake .35s}
@@ -70,14 +70,14 @@
 
 <div class="gate" id="gate">
   <div class="gate-card">
-    <h2>Access code</h2>
+    <h2>District code</h2>
     <p>Enter your 4-digit code to continue.</p>
     <div class="pin" id="pin">
-      <input maxlength="1" inputmode="numeric" autocomplete="off">
-      <input maxlength="1" inputmode="numeric" autocomplete="off">
-      <input maxlength="1" inputmode="numeric" autocomplete="off">
-      <input maxlength="1" inputmode="numeric" autocomplete="off">
-    </div>
+	  <input type="password" maxlength="1" inputmode="numeric" autocomplete="new-password">
+	  <input type="password" maxlength="1" inputmode="numeric" autocomplete="new-password">
+	  <input type="password" maxlength="1" inputmode="numeric" autocomplete="new-password">
+	  <input type="password" maxlength="1" inputmode="numeric" autocomplete="new-password">
+	</div>
     <div class="gate-msg">Incorrect code</div>
   </div>
 </div>
