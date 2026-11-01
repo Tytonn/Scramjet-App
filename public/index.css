@@ -401,8 +401,10 @@ html:has(body.portal) {
 	pointer-events: none;
 }
 
-.orbits.is-pulse {
-	animation: orbits-pulse 1.6s var(--ease-out);
+/* Note: the pulse runs on the rings, not on .orbits, because swapping
+   .orbits' own animation would make its intro fade-in replay afterwards. */
+.orbits.is-pulse .orbit {
+	animation: ring-pulse 1.6s var(--ease-out);
 }
 
 .orbits.is-pulse::after {
@@ -419,9 +421,11 @@ html:has(body.portal) {
 	}
 }
 
-@keyframes orbits-pulse {
+/* transform (not scale): the warp tightens the rings with scale, and the two
+   simply stack if Enter is pressed mid-pulse */
+@keyframes ring-pulse {
 	22% {
-		scale: 1.045;
+		transform: scale(1.045);
 	}
 }
 
@@ -1252,12 +1256,6 @@ html:has(body.portal) {
 	animation: none;
 }
 
-.lite .title,
-.lite .pill,
-.lite .hint {
-	animation-name: fade-in;
-}
-
 /* ==========================================================================
    Responsive + accessibility
    ========================================================================== */
@@ -1316,7 +1314,7 @@ html:has(body.portal) {
 	}
 
 	.status-dot,
-	.orbits.is-pulse,
+	.orbits.is-pulse .orbit,
 	.orbits.is-pulse::after,
 	.orbits.is-pulse .orbit::before {
 		animation: none !important;
