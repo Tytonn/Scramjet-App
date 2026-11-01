@@ -29,8 +29,12 @@ const searchEngine = document.getElementById("sj-search-engine");
 const hint = document.getElementById("hint");
 const statusBar = document.getElementById("status");
 const statusText = document.getElementById("status-text");
+const warp = document.getElementById("warp");
+const core = document.getElementById("core");
+const burst = document.getElementById("burst");
 
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+const finePointer = matchMedia("(hover: hover) and (pointer: fine)");
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const el = (tag, text) =>
@@ -85,20 +89,33 @@ async function prepare() {
 }
 
 let engine = null;
+let engineState = "starting";
 
 /** Starts the warm-up once; call again after a failure to retry. */
 function warmUp() {
 	if (!engine) {
+		engineState = "starting";
 		engine = prepare();
 		engine.then(
-			() => setStatus("ready", "Ready"),
+			() => {
+				engineState = "ready";
+				showEngineStatus();
+			},
 			(err) => {
 				console.error(err);
-				setStatus("error", "Offline");
+				engineState = "error";
+				showEngineStatus();
 			}
 		);
 	}
 	return engine;
+}
+
+function showEngineStatus() {
+	if (root.dataset.view === "loading") return; // shows "Connecting" then
+	if (engineState === "ready") setStatus("ready", "Ready");
+	else if (engineState === "error") setStatus("error", "Offline");
+	else setStatus("starting", "Starting");
 }
 
 /* ==========================================================================
@@ -107,12 +124,12 @@ function warmUp() {
 
 let busy = false;
 
-/** @param {"lock" | "home" | "loading" | "browse"} view */
+/** @param {"lock" | "home" | "loading" | "launch" | "browse"} view */
 function setView(view) {
 	root.dataset.view = view;
 	lock.inert = view !== "lock";
-	form.inert = view === "lock" || view === "browse";
-	address.readOnly = view === "loading";
+	form.inert = view !== "home";
+	address.readOnly = view !== "home";
 }
 
 function setStatus(state, label) {
@@ -210,6 +227,7 @@ function unlock() {
 	// Move focus to the link field immediately (inside the same input event),
 	// so phone keyboards stay open while the bar unfolds.
 	form.inert = false;
+	address.readOnly = false;
 	address.focus({ preventScroll: true });
 	pill.classList.add("is-ok");
 
@@ -265,7 +283,12 @@ function renderPreview() {
 	);
 }
 
-address.addEventListener("input", renderPreview);
+address.addEventListener("input", () => {
+	renderPreview();
+	// Typing a link is a clear sign of intent: warm up right now so the
+	// engine is ready by the time Enter is pressed.
+	if (!engine) warmUp();
+});
 
 form.addEventListener("submit", async (event) => {
 	event.preventDefault();
@@ -278,6 +301,10 @@ form.addEventListener("submit", async (event) => {
 		return;
 	}
 
+	buildWarp();
+	const id = ++launchId;
+	warpStartedAt = performance.now();
+
 	setView("loading");
 	setStatus("starting", "Connecting");
 	setHint(
@@ -285,6 +312,16 @@ form.addEventListener("submit", async (event) => {
 			? ["Searching", el("b", `“${target.value}”`)]
 			: ["Connecting to", el("b", new URL(target.url).host)]
 	);
+
+	// If it's taking a while, quietly offer a way out.
+	setTimeout(() => {
+		if (
+			id === launchId &&
+			root.dataset.view === "loading" &&
+			finePointer.matches
+		)
+			hint.append(el("small", "esc to cancel"));
+	}, 6000);
 
 	try {
 		// If the background warm-up failed, give it one more honest try.
@@ -294,15 +331,16 @@ form.addEventListener("submit", async (event) => {
 		});
 		await ensureTransport();
 	} catch (err) {
-		fail(err);
+		if (id === launchId) fail(err);
 		return;
 	}
 
-	launch(target.url);
+	if (id === launchId) launch(target.url, id);
 });
 
 function fail(err) {
 	console.error(err);
+	dropFrame();
 	setView("home");
 	setStatus("error", "Offline");
 
@@ -320,16 +358,73 @@ function fail(err) {
 }
 
 /* ==========================================================================
+   The warp: starlight streaks, built once on the first launch
+   ========================================================================== */
+
+let launchId = 0;
+let warpStartedAt = 0;
+let activeFrame = null;
+
+// The build-up always gets this long before the page appears, even when
+// the page is instant, so the moment never feels cut off.
+const MIN_WARP = 1300;
+
+function buildWarp() {
+	if (warp.childElementCount || isLite() || reducedMotion.matches) return;
+
+	const count = 48;
+	const reach = Math.hypot(innerWidth, innerHeight) / 2;
+	const rand = (min, max) => min + Math.random() * (max - min);
+	const streaks = document.createDocumentFragment();
+
+	for (let i = 0; i < count; i++) {
+		const streak = document.createElement("i");
+		streak.style.cssText = [
+			`--ang: ${((i * 360) / count + rand(-4, 4)).toFixed(1)}deg`,
+			`--from: ${Math.round(rand(0.45, 1.05) * reach)}px`,
+			`--len: ${Math.round(rand(50, 170))}px`,
+			`--dur: ${rand(0.75, 1.5).toFixed(2)}s`,
+			`--delay: ${rand(0, 1.4).toFixed(2)}s`,
+			`--b: ${rand(0.45, 1).toFixed(2)}`,
+		].join(";");
+		streaks.append(streak);
+	}
+	warp.append(streaks);
+}
+
+/** Esc during a slow load: unwind the warp and go back to the bar. */
+function cancelLaunch() {
+	launchId++;
+	dropFrame();
+	setView("home");
+	showEngineStatus();
+	renderPreview();
+	address.focus();
+}
+
+function dropFrame() {
+	activeFrame?.remove();
+	activeFrame = null;
+}
+
+/* ==========================================================================
    Screen 3: the page itself — a bare, fullscreen frame. Nothing on top.
    ========================================================================== */
 
-function launch(url) {
+function launch(url, id) {
 	const frame = scramjet.createFrame();
 	frame.frame.id = "sj-frame";
+	activeFrame = frame.frame;
 	document.body.appendChild(frame.frame);
 	frame.go(url);
 
-	waitForFrame(frame.frame).then(() => reveal(frame.frame));
+	const buildUp = reducedMotion.matches
+		? 0
+		: Math.max(0, warpStartedAt + MIN_WARP - performance.now());
+
+	Promise.all([waitForFrame(frame.frame), wait(buildUp)]).then(() => {
+		if (id === launchId) reveal(frame.frame);
+	});
 }
 
 /** Resolves once the page has something to show (or after 12s). */
@@ -370,24 +465,30 @@ function waitForFrame(iframe) {
 }
 
 function reveal(iframe) {
-	setView("browse");
-	iframe.classList.add("is-shown");
-	address.blur();
+	// The core detonates (flash + shockwave)...
+	setView("launch");
 	stopParallax();
 
-	try {
-		iframe.contentWindow.focus();
-	} catch (err) {
-		// Focus is a nicety; the page still works without it.
-	}
+	// ...and a beat later the page fades in underneath the fading flash.
+	setTimeout(
+		() => {
+			setView("browse");
+			iframe.classList.add("is-shown");
+			try {
+				iframe.contentWindow.focus();
+			} catch (err) {
+				// Focus is a nicety; the page still works without it.
+			}
+		},
+		reducedMotion.matches ? 0 : 140
+	);
 
-	// Once the fly-through finishes, take the UI out of rendering entirely so
-	// the page gets every bit of the GPU/CPU.
+	// Once the flash is gone, take the whole UI out of rendering so the page
+	// gets every bit of the GPU/CPU. Only the page is left.
 	setTimeout(() => {
-		stage.hidden = true;
-		ambient.hidden = true;
-		statusBar.hidden = true;
-	}, 650);
+		for (const node of [stage, ambient, statusBar, core, burst])
+			node.hidden = true;
+	}, 1200);
 }
 
 /* ==========================================================================
@@ -410,6 +511,8 @@ document.addEventListener("keydown", (event) => {
 			focusCode();
 		return;
 	}
+
+	if (view === "loading" && event.key === "Escape") return cancelLaunch();
 
 	if (view !== "home") return;
 
@@ -440,7 +543,6 @@ document.addEventListener("keydown", (event) => {
    GPU layer, so this only slides layers around (nothing is repainted).
    ========================================================================== */
 
-const finePointer = matchMedia("(hover: hover) and (pointer: fine)");
 let pointerX = 0;
 let pointerY = 0;
 let currentX = 0;
@@ -494,35 +596,51 @@ function enableLite() {
 	}
 }
 
-/** Watches real frame pacing for a moment; switches to lite mode if choppy. */
-function measureSmoothness(duration = 2000) {
+/**
+ * Watches real frame pacing while nothing is transitioning (so the unlock
+ * morph never counts against the device) and switches to lite mode if the
+ * calm, idle animation itself is choppy.
+ */
+function measureSmoothness(duration = 1500) {
 	return new Promise((resolve) => {
 		if (isLite() || reducedMotion.matches) return resolve();
 
-		const gaps = [];
-		const start = performance.now();
+		let gaps = [];
+		let start = performance.now();
 		let last = 0;
+		let view = root.dataset.view;
+		const giveUp = start + 9000;
+		setTimeout(resolve, 9500); // e.g. the tab stays hidden: just move on
 
-		const decide = () => {
+		const calm = () => !busy && !orbits.classList.contains("is-pulse");
+
+		requestAnimationFrame(function sample(now) {
+			// The page is opening, the warm-up already started (it would skew
+			// the numbers), or this is taking too long: stop judging.
+			if (["loading", "launch", "browse"].includes(root.dataset.view))
+				return resolve();
+			if (engine || now > giveUp) return resolve();
+
+			// A transition happened: let it settle, then start a fresh window.
+			if (root.dataset.view !== view || !calm()) {
+				view = root.dataset.view;
+				gaps = [];
+				start = now + 700;
+				last = 0;
+				return requestAnimationFrame(sample);
+			}
+			if (now < start) return requestAnimationFrame(sample);
+
+			if (last && now - last < 250) gaps.push(now - last);
+			last = now;
+			if (now - start < duration) return requestAnimationFrame(sample);
+
 			gaps.sort((a, b) => a - b);
 			const typical = gaps[Math.floor(gaps.length * 0.75)];
 			// 60Hz frames are ~17ms; a typical frame over 24ms means many are
 			// being dropped.
 			if (gaps.length >= 20 && typical > 24) enableLite();
 			resolve();
-		};
-		const fallback = setTimeout(decide, duration + 600);
-
-		requestAnimationFrame(function sample(now) {
-			if (root.dataset.view === "loading" || root.dataset.view === "browse") {
-				clearTimeout(fallback);
-				return resolve(); // the page is opening; don't measure that
-			}
-			if (last && now - last < 250) gaps.push(now - last);
-			last = now;
-			if (now - start < duration) return requestAnimationFrame(sample);
-			clearTimeout(fallback);
-			decide();
 		});
 	});
 }
@@ -553,8 +671,8 @@ boot().then(() => {
 	if (root.dataset.view === "lock") focusCode();
 	else address.focus({ preventScroll: true });
 
-	// Let the intro finish first, check how smooth this device is, then warm
+	// Let the intro fully finish, check how smooth this device is, then warm
 	// up in the background (a slow CPU never has to do both at once).
 	// Submitting earlier simply starts the warm-up right away.
-	setTimeout(() => measureSmoothness().then(warmUp), 1400);
+	setTimeout(() => measureSmoothness().then(() => void warmUp()), 1900);
 });

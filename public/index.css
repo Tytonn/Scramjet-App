@@ -192,11 +192,7 @@ html:has(body.portal) {
 	grid-template-columns: minmax(0, 1fr);
 	justify-items: center;
 	padding: 0 16px;
-	transform-origin: 50% 50%;
-	transition:
-		opacity 0.45s var(--ease-out),
-		transform 0.6s var(--ease-out),
-		filter 0.45s var(--ease-out);
+	transition: opacity 0.45s var(--ease-out);
 }
 
 .title {
@@ -214,6 +210,10 @@ html:has(body.portal) {
 	letter-spacing: -0.012em;
 	text-align: center;
 	user-select: none;
+	transition:
+		opacity 0.45s var(--ease-out),
+		transform 0.6s var(--ease-out),
+		filter 0.45s var(--ease-out);
 }
 
 .title span {
@@ -261,7 +261,6 @@ html:has(body.portal) {
 	inset: 0;
 	z-index: 0;
 	pointer-events: none;
-	transition: scale 6s cubic-bezier(0.2, 0.6, 0.2, 1);
 }
 
 .orbit {
@@ -270,6 +269,8 @@ html:has(body.portal) {
 	--o: -14s;
 	--z: 8; /* parallax depth */
 	--a: 1; /* outer rings are dimmer */
+	--sq: 0.3; /* how tight it pulls in during the warp */
+	--n: 2; /* turns it spins up through */
 	--r: calc(var(--d) / 2);
 	position: absolute;
 	left: 50%;
@@ -281,6 +282,7 @@ html:has(body.portal) {
 	border: 1px solid rgba(255, 255, 255, calc(0.055 * var(--a)));
 	translate: calc(var(--px, 0) * var(--z) * 1px)
 		calc(var(--py, 0) * var(--z) * 1px);
+	transition: scale 1.9s cubic-bezier(0.6, 0, 0.25, 1);
 	will-change: transform;
 }
 
@@ -292,6 +294,7 @@ html:has(body.portal) {
 	border-radius: 50%;
 	border: 1px solid rgba(255, 255, 255, calc(0.2 * var(--a)));
 	opacity: 0;
+	transition: opacity 1.2s var(--ease-out);
 }
 
 .orbit:nth-child(2) {
@@ -300,6 +303,8 @@ html:has(body.portal) {
 	--o: -52s;
 	--z: 16;
 	--a: 0.74;
+	--sq: 0.2;
+	--n: 1;
 }
 
 .orbit:nth-child(3) {
@@ -308,6 +313,8 @@ html:has(body.portal) {
 	--o: -31s;
 	--z: 26;
 	--a: 0.3;
+	--sq: 0.16;
+	--n: 1;
 }
 
 /* The comet: a box hugging the last ~56° of the ring (plus room for the
@@ -323,6 +330,7 @@ html:has(body.portal) {
 	height: calc(var(--r) * 0.45 + var(--pad) * 2);
 	opacity: var(--a);
 	transform-origin: var(--cx) var(--cy);
+	transition: opacity 1s var(--ease-out);
 	animation: orbit var(--t) linear var(--o) infinite;
 	will-change: transform;
 }
@@ -453,7 +461,9 @@ html:has(body.portal) {
 	transition:
 		width var(--spring-time) var(--spring),
 		background-color 0.35s ease,
-		box-shadow 0.5s var(--ease-out);
+		box-shadow 0.5s var(--ease-out),
+		opacity 0.35s var(--ease-out),
+		scale 0.5s var(--ease-out);
 }
 
 /* Opaque inner surface (no backdrop blur: that re-blurs every frame). */
@@ -794,26 +804,6 @@ html:has(body.portal) {
 	transform: translateX(1.5px);
 }
 
-/* Spinner (loading) */
-.go::after {
-	content: "";
-	grid-area: 1 / 1;
-	width: 17px;
-	height: 17px;
-	border-radius: 50%;
-	border: 2px solid rgba(5, 5, 6, 0.16);
-	border-top-color: #050506;
-	opacity: 0;
-	transition: opacity 0.2s ease;
-	animation: spin 0.7s linear infinite paused;
-}
-
-@keyframes spin {
-	to {
-		transform: rotate(1turn);
-	}
-}
-
 /* ---------- Hint line ---------- */
 
 .hint {
@@ -833,7 +823,8 @@ html:has(body.portal) {
 	white-space: nowrap;
 	transition:
 		opacity 0.3s ease,
-		color 0.3s ease;
+		color 0.3s ease,
+		transform 0.8s var(--ease-out);
 }
 
 .hint:empty {
@@ -861,6 +852,16 @@ html:has(body.portal) {
 	background: rgba(255, 255, 255, 0.03);
 	color: var(--fg-2);
 	font: 500 12.5px/1 var(--font);
+}
+
+.hint small {
+	font-size: inherit;
+	color: var(--faint);
+}
+
+.hint:not([data-tone="error"]) small::before {
+	content: "·";
+	margin-right: 10px;
 }
 
 .hint[data-tone="error"] {
@@ -942,53 +943,215 @@ html:has(body.portal) {
 	width: var(--pill-home);
 }
 
-/* Loading: beam races, spinner turns, the field leans in */
-:root[data-view="loading"] .pill::after {
-	opacity: 1;
-	animation-duration: 1.3s;
-	animation-play-state: running;
+/* ==========================================================================
+   Warp: what happens after Enter
+   1. The bar dissolves into a glowing core. The stars spin up, their orbits
+      tighten around it, and starlight streams in from every side. This loops
+      for as long as the page takes to load.
+   2. When the page is ready the core detonates into a flash and a
+      shockwave, and the page fades in underneath.
+   Everything here is transform/opacity on small GPU layers, so it stays
+   smooth even while the page is busy loading.
+   ========================================================================== */
+
+/* The title and the bar let go */
+:root:is([data-view="loading"], [data-view="launch"], [data-view="browse"])
+	.title {
+	opacity: 0;
+	transform: translateY(-12px);
+	filter: blur(8px);
 }
 
-:root[data-view="loading"] .go,
-:root[data-view="browse"] .go {
-	opacity: 1;
-	transform: none;
+:root:is([data-view="loading"], [data-view="launch"], [data-view="browse"])
+	.pill {
+	opacity: 0;
+	scale: 0.9;
 	pointer-events: none;
 }
 
-:root[data-view="loading"] .go svg,
-:root[data-view="browse"] .go svg {
-	opacity: 0;
-	transform: translateX(10px);
+/* The status line drops below the vortex */
+:root:is([data-view="loading"], [data-view="launch"]) .hint {
+	transform: translateY(64px);
 }
 
-:root[data-view="loading"] .go::after,
-:root[data-view="browse"] .go::after {
+/* The stars spin up while their orbits tighten around the core */
+:root:is([data-view="loading"], [data-view="launch"]) .orbit {
+	scale: var(--sq);
+}
+
+:root:is([data-view="loading"], [data-view="launch"]) .orbit::before {
 	opacity: 1;
-	animation-play-state: running;
 }
 
-:root[data-view="loading"] #sj-address,
-:root[data-view="browse"] #sj-address {
-	color: var(--fg-2);
+:root:is([data-view="loading"], [data-view="launch"]) .orbit i {
+	opacity: 1;
+	animation:
+		orbit var(--t) linear var(--o) infinite,
+		spin-up 1.6s cubic-bezier(0.5, 0, 0.75, 0.5) forwards,
+		spin-fast calc(0.8s / var(--n)) linear 1.6s infinite;
 }
 
-:root[data-view="loading"] .orbits {
-	scale: 1.14;
+/* Accelerates from rest and ends at exactly the speed spin-fast keeps */
+@keyframes spin-up {
+	to {
+		rotate: calc(var(--n) * 1turn);
+	}
 }
 
-/* Browse: fly through, then hand the whole screen to the page */
-:root[data-view="browse"] .stage {
+@keyframes spin-fast {
+	to {
+		rotate: 1turn;
+	}
+}
+
+/* Starlight (built by index.js): each streak hangs from the center along
+   its own ray and slides inward, speeding up, fading into the core. */
+.warp {
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	pointer-events: none;
 	opacity: 0;
-	transform: scale(1.1);
-	filter: blur(12px);
+	transition: opacity 0.5s var(--ease-out);
+}
+
+.warp i {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: 1.5px;
+	height: var(--len);
+	margin-left: -0.75px;
+	border-radius: 1px;
+	background: linear-gradient(#fff, rgba(255, 255, 255, 0));
+	transform-origin: 50% 0;
+	rotate: var(--ang);
+	opacity: 0;
+}
+
+:root[data-view="loading"] .warp {
+	opacity: 1;
+}
+
+:root:is([data-view="loading"], [data-view="launch"]) .warp i {
+	animation: inflow var(--dur) cubic-bezier(0.55, 0, 0.9, 0.45) var(--delay)
+		infinite;
+}
+
+@keyframes inflow {
+	from {
+		transform: translateY(var(--from)) scaleY(0.1);
+		opacity: 0;
+	}
+	55% {
+		opacity: var(--b);
+	}
+	to {
+		transform: translateY(24px) scaleY(1);
+		opacity: 0;
+	}
+}
+
+/* The core: a soft star at the exact center. It sits above everything so
+   its flash can wash over the page as the page appears. */
+.core {
+	position: fixed;
+	left: 50%;
+	top: 50%;
+	z-index: 20;
+	width: 900px;
+	height: 900px;
+	margin: -450px 0 0 -450px;
+	border-radius: 50%;
+	background: radial-gradient(
+		closest-side,
+		#fff 7%,
+		rgba(255, 255, 255, 0.82) 10%,
+		rgba(222, 230, 255, 0.38) 21%,
+		rgba(222, 230, 255, 0.12) 40%,
+		rgba(222, 230, 255, 0.035) 64%,
+		transparent
+	);
+	opacity: 0;
+	scale: 0.02;
+	pointer-events: none;
+	transition:
+		opacity 0.4s var(--ease-out),
+		scale 0.9s var(--spring);
+}
+
+:root[data-view="loading"] .core {
+	opacity: 1;
+	scale: 0.14;
+	animation: core-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes core-pulse {
+	50% {
+		transform: scale(1.15);
+	}
+}
+
+/* Launch: the core detonates into a flash... */
+:root:is([data-view="launch"], [data-view="browse"]) .core {
+	opacity: 0;
+	scale: 7;
+	transition:
+		scale 0.8s cubic-bezier(0.2, 0, 0.1, 1),
+		opacity 0.75s cubic-bezier(0.6, 0, 0.9, 0.6);
+}
+
+/* ...with a shockwave racing outward */
+.burst {
+	position: fixed;
+	left: 50%;
+	top: 50%;
+	z-index: 21;
+	width: 160px;
+	height: 160px;
+	margin: -80px 0 0 -80px;
+	border-radius: 50%;
+	border: 1.5px solid rgba(255, 255, 255, 0.9);
+	box-shadow:
+		0 0 24px rgba(255, 255, 255, 0.35),
+		inset 0 0 24px rgba(255, 255, 255, 0.18);
+	opacity: 0;
 	pointer-events: none;
 }
 
-:root[data-view="browse"] .ambient,
-:root[data-view="browse"] .status {
+:root:is([data-view="launch"], [data-view="browse"]) .burst {
+	animation: burst 1s cubic-bezier(0.15, 0.6, 0.3, 1) forwards;
+}
+
+@keyframes burst {
+	from {
+		opacity: 1;
+		transform: scale(0.25);
+	}
+	to {
+		opacity: 0;
+		transform: scale(12);
+	}
+}
+
+/* Everything else lets go */
+:root:is([data-view="launch"], [data-view="browse"]) .warp,
+:root:is([data-view="launch"], [data-view="browse"]) .orbits,
+:root:is([data-view="launch"], [data-view="browse"]) .hint {
+	opacity: 0;
+	transition: opacity 0.3s var(--ease-out);
+}
+
+:root:is([data-view="launch"], [data-view="browse"]) .ambient,
+:root:is([data-view="launch"], [data-view="browse"]) .status {
 	opacity: 0;
 	transition-delay: 0s;
+}
+
+/* Browse: the page owns the whole screen */
+:root[data-view="browse"] .stage {
+	opacity: 0;
+	pointer-events: none;
 }
 
 #sj-frame {
@@ -1003,11 +1166,16 @@ html:has(body.portal) {
 	border: 0;
 	background: Canvas;
 	opacity: 0;
-	transition: opacity 0.6s var(--ease-out) 0.1s;
+	scale: 1.06;
+	transition:
+		opacity 0.7s var(--ease-out),
+		scale 1.2s var(--ease-out);
 }
 
+/* It arrives out of the flash, easing back from slightly too close */
 #sj-frame.is-shown {
 	opacity: 1;
+	scale: none;
 }
 
 /* ==========================================================================
@@ -1045,7 +1213,7 @@ html:has(body.portal) {
 }
 
 .orbits {
-	animation: fade-in 2.4s var(--ease-out) 0.15s backwards;
+	animation: fade-in 1.6s var(--ease-out) 0.15s backwards;
 }
 
 .boot .ambient,
@@ -1072,12 +1240,12 @@ html:has(body.portal) {
 	will-change: auto;
 }
 
-.lite[data-view="loading"] .orbits {
-	scale: none;
+.lite .warp {
+	display: none;
 }
 
-.lite[data-view="browse"] .stage {
-	filter: none;
+.lite:is([data-view="loading"], [data-view="launch"]) .orbit {
+	scale: none;
 }
 
 .lite #code:focus ~ .dots i.next {
@@ -1170,6 +1338,28 @@ html:has(body.portal) {
 	.dots i,
 	.stage {
 		transition-duration: 0.01s !important;
+	}
+
+	/* The warp becomes a calm fade: no streaks, no spin, no zoom */
+	.warp,
+	.burst {
+		display: none;
+	}
+
+	:root:is([data-view="loading"], [data-view="launch"]) .orbit {
+		scale: none;
+	}
+
+	:root[data-view="loading"] .core {
+		animation: none;
+	}
+
+	:root:is([data-view="launch"], [data-view="browse"]) .core {
+		scale: 0.14;
+	}
+
+	#sj-frame {
+		scale: none;
 	}
 }
 
