@@ -31,7 +31,6 @@ const statusBar = document.getElementById("status");
 const statusText = document.getElementById("status-text");
 
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
-const finePointer = matchMedia("(hover: hover) and (pointer: fine)");
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const el = (tag, text) =>
@@ -85,15 +84,22 @@ async function prepare() {
 	await ensureTransport();
 }
 
-let engine = prepare();
+let engine = null;
 
-engine.then(
-	() => setStatus("ready", "Ready"),
-	(err) => {
-		console.error(err);
-		setStatus("error", "Offline");
+/** Starts the warm-up once; call again after a failure to retry. */
+function warmUp() {
+	if (!engine) {
+		engine = prepare();
+		engine.then(
+			() => setStatus("ready", "Ready"),
+			(err) => {
+				console.error(err);
+				setStatus("error", "Offline");
+			}
+		);
 	}
-);
+	return engine;
+}
 
 /* ==========================================================================
    View + small UI helpers
@@ -137,7 +143,7 @@ function shake() {
 }
 
 function pulseOrbits() {
-	if (reducedMotion.matches) return;
+	if (reducedMotion.matches || root.classList.contains("lite")) return;
 	orbits.classList.remove("is-pulse");
 	void orbits.offsetWidth; // restart the animation
 	orbits.classList.add("is-pulse");
@@ -282,7 +288,10 @@ form.addEventListener("submit", async (event) => {
 
 	try {
 		// If the background warm-up failed, give it one more honest try.
-		await engine.catch(() => (engine = prepare()));
+		await warmUp().catch(() => {
+			engine = null;
+			return warmUp();
+		});
 		await ensureTransport();
 	} catch (err) {
 		fail(err);
@@ -378,7 +387,7 @@ function reveal(iframe) {
 		stage.hidden = true;
 		ambient.hidden = true;
 		statusBar.hidden = true;
-	}, 900);
+	}, 650);
 }
 
 /* ==========================================================================
@@ -426,7 +435,12 @@ document.addEventListener("keydown", (event) => {
 	}
 });
 
-// Gentle parallax on the orbit field (mouse/trackpad only).
+/* ==========================================================================
+   Parallax: the rings drift with the mouse/trackpad. Each ring is its own
+   GPU layer, so this only slides layers around (nothing is repainted).
+   ========================================================================== */
+
+const finePointer = matchMedia("(hover: hover) and (pointer: fine)");
 let pointerX = 0;
 let pointerY = 0;
 let currentX = 0;
@@ -442,11 +456,8 @@ function onPointerMove(event) {
 function tick() {
 	currentX += (pointerX - currentX) * 0.07;
 	currentY += (pointerY - currentY) * 0.07;
-
-	for (const layer of [stage, ambient]) {
-		layer.style.setProperty("--px", currentX.toFixed(4));
-		layer.style.setProperty("--py", currentY.toFixed(4));
-	}
+	orbits.style.setProperty("--px", currentX.toFixed(4));
+	orbits.style.setProperty("--py", currentY.toFixed(4));
 
 	const moving =
 		Math.abs(pointerX - currentX) + Math.abs(pointerY - currentY) > 0.0004;
@@ -454,7 +465,7 @@ function tick() {
 }
 
 function startParallax() {
-	if (finePointer.matches && !reducedMotion.matches)
+	if (finePointer.matches && !reducedMotion.matches && !isLite())
 		addEventListener("pointermove", onPointerMove, { passive: true });
 }
 
@@ -462,6 +473,58 @@ function stopParallax() {
 	removeEventListener("pointermove", onPointerMove);
 	cancelAnimationFrame(frameRequest);
 	frameRequest = 0;
+}
+
+/* ==========================================================================
+   Lite mode: on a device that can't keep the ambient motion smooth, freeze
+   it (it looks the same, just still) so typing always stays responsive.
+   ========================================================================== */
+
+function isLite() {
+	return root.classList.contains("lite");
+}
+
+function enableLite() {
+	root.classList.add("lite");
+	stopParallax();
+	try {
+		sessionStorage.setItem("lite", "1");
+	} catch (err) {
+		// Not remembered; it will simply be measured again next time.
+	}
+}
+
+/** Watches real frame pacing for a moment; switches to lite mode if choppy. */
+function measureSmoothness(duration = 2000) {
+	return new Promise((resolve) => {
+		if (isLite() || reducedMotion.matches) return resolve();
+
+		const gaps = [];
+		const start = performance.now();
+		let last = 0;
+
+		const decide = () => {
+			gaps.sort((a, b) => a - b);
+			const typical = gaps[Math.floor(gaps.length * 0.75)];
+			// 60Hz frames are ~17ms; a typical frame over 24ms means many are
+			// being dropped.
+			if (gaps.length >= 20 && typical > 24) enableLite();
+			resolve();
+		};
+		const fallback = setTimeout(decide, duration + 600);
+
+		requestAnimationFrame(function sample(now) {
+			if (root.dataset.view === "loading" || root.dataset.view === "browse") {
+				clearTimeout(fallback);
+				return resolve(); // the page is opening; don't measure that
+			}
+			if (last && now - last < 250) gaps.push(now - last);
+			last = now;
+			if (now - start < duration) return requestAnimationFrame(sample);
+			clearTimeout(fallback);
+			decide();
+		});
+	});
 }
 
 /* ==========================================================================
@@ -489,4 +552,9 @@ startParallax();
 boot().then(() => {
 	if (root.dataset.view === "lock") focusCode();
 	else address.focus({ preventScroll: true });
+
+	// Let the intro finish first, check how smooth this device is, then warm
+	// up in the background (a slow CPU never has to do both at once).
+	// Submitting earlier simply starts the warm-up right away.
+	setTimeout(() => measureSmoothness().then(warmUp), 1400);
 });

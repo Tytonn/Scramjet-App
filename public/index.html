@@ -30,6 +30,8 @@
 			try {
 				if (sessionStorage.getItem("gate_ok") === "1")
 					document.documentElement.dataset.view = "home";
+				if (sessionStorage.getItem("lite") === "1")
+					document.documentElement.classList.add("lite");
 			} catch (e) {}
 			setTimeout(function () {
 				document.documentElement.classList.remove("boot");
