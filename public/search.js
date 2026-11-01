@@ -6,10 +6,15 @@
  * @returns {string} Fully qualified URL
  */
 function search(input, template) {
+	input = input.trim();
+
 	try {
-		// input is a valid URL:
+		// input is a valid http(s) URL:
 		// eg: https://example.com, https://example.com/test?q=param
-		return new URL(input).toString();
+		// (other schemes like javascript: or mailto: fall through to a search)
+		const url = new URL(input);
+		if (url.protocol === "http:" || url.protocol === "https:")
+			return url.toString();
 	} catch (err) {
 		// input was not a valid URL
 	}
